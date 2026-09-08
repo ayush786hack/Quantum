@@ -1,0 +1,7 @@
+import React from "react";
+
+export default function FleetPlanView({ plans }) { const items = plans.length ? plans : [
+	{ vessel: { vessel_id: "V012", vessel_type: "Container Ship", capacity: 12400 }, route: { id: "R03", origin: "Hamburg", destination: "New York" }, speed_knots: 16.4, fuel_type: "Methanol", shore_power_used: true },
+	{ vessel: { vessel_id: "V021", vessel_type: "Bulk Carrier", capacity: 78200 }, route: { id: "R05", origin: "Tokyo", destination: "Los Angeles" }, speed_knots: 13.2, fuel_type: "Ammonia", shore_power_used: true },
+	{ vessel: { vessel_id: "V033", vessel_type: "Oil Tanker", capacity: 108400 }, route: { id: "R02", origin: "Singapore", destination: "Mumbai" }, speed_knots: 12.8, fuel_type: "LNG", shore_power_used: false }
+]; return <div className="plan-table"><div className="chart-note"><span className="legend-dot lime" /> Selected deployment <small>{plans.length ? "Live optimizer output" : "Preloaded case study plan"}</small></div>{items.slice(0, 5).map((item, index) => <div className="plan-row" key={`${item.vessel?.vessel_id}-${index}`}><span className="rank">0{index + 1}</span><strong>{item.vessel?.vessel_id || "V—"}<small>{item.vessel?.vessel_type || "Vessel"}</small></strong><span>{item.route?.origin || "Origin"} <b>→</b> {item.route?.destination || "Destination"}</span><span className="speed">{Number(item.speed_knots || 0).toFixed(1)} kn</span><span className="fuel">{item.fuel_type}</span><span className={item.shore_power_used ? "power on" : "power"}>{item.shore_power_used ? "ON" : "OFF"}</span></div>)}</div>; }

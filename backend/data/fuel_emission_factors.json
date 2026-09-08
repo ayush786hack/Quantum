@@ -1,0 +1,7 @@
+{
+  "HFO": {"energy_density_MJ_per_kg": 40.5, "wtw_emission_factor_gCO2e_per_MJ": 92.0},
+  "LNG": {"energy_density_MJ_per_kg": 50.0, "wtw_emission_factor_gCO2e_per_MJ": 76.0},
+  "Methanol": {"energy_density_MJ_per_kg": 19.9, "wtw_emission_factor_gCO2e_per_MJ": 65.0},
+  "Hydrogen": {"energy_density_MJ_per_kg": 120.0, "wtw_emission_factor_gCO2e_per_MJ": 10.0},
+  "Ammonia": {"energy_density_MJ_per_kg": 18.6, "wtw_emission_factor_gCO2e_per_MJ": 5.0}
+}
