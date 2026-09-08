@@ -9,3 +9,4 @@ matplotlib
 shap
 qiskit
 qiskit-aer
+reportlab

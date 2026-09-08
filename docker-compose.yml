@@ -1,10 +1,37 @@
-version: "3.9"
 services:
   backend:
     build: ./backend
     ports:
       - "8000:8000"
+    environment:
+      POSTGRES_URL: postgresql://fleet:fleet@postgres:5432/fleet
+      MONGO_URL: mongodb://mongo:27017/fleet
+    depends_on:
+      - postgres
+      - mongo
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
+      - "3000:80"
+    depends_on:
+      - backend
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: fleet
+      POSTGRES_DB: fleet
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  postgres_data:
+  mongo_data:

@@ -1,11 +1,17 @@
 import sys
 import os
+import json
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from prediction.predictor import predict_fuel_consumption_with_uncertainty, explain_fuel_prediction, calculate_wtw_emissions, calculate_voyage_cost, calculate_cii_rating, calculate_compliance_forecast
+from prediction.data_preprocessing import load_and_preprocess_data
 
 router = APIRouter(prefix="/api", tags=["Prediction"])
 
@@ -62,3 +68,27 @@ def predict_fuel_endpoint(req: FuelPredictionRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/prediction-metrics")
+def prediction_metrics():
+    """Return reproducible holdout metrics and residual diagnostics from the saved model."""
+    artifact = __import__("prediction.predictor", fromlist=["get_model_artifact"]).get_model_artifact()
+    if artifact is None:
+        raise HTTPException(status_code=503, detail="Train the model artifact first")
+    X, y, _ = load_and_preprocess_data()
+    model = artifact["model"]
+    _, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    predictions = model.predict(X_test)
+    residuals = np.asarray(y_test) - predictions
+    return {
+        "model": "GradientBoostingRegressor",
+        "dataset_rows": int(len(y)),
+        "evaluation_split": "deterministic 80/20 holdout (random_state=42)",
+        "r2_score": round(float(r2_score(y_test, predictions)), 4),
+        "rmse_tonnes": round(float(np.sqrt(mean_squared_error(y_test, predictions))), 4),
+        "mae_tonnes": round(float(mean_absolute_error(y_test, predictions)), 4),
+        "residual_mean_tonnes": round(float(np.mean(residuals)), 4),
+        "residual_std_tonnes": round(float(np.std(residuals)), 4),
+        "residual_percentiles_tonnes": {str(percentile): round(float(np.percentile(residuals, percentile)), 4) for percentile in [5, 50, 95]},
+        "feature_count": int(X.shape[1]),
+    }

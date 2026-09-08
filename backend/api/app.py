@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import predict, optimize, benchmark, scenario
+from api.routes import predict, optimize, benchmark, scenario, stream, report
 
 app = FastAPI(
     title="Green Fleet Management Optimization API (SIH 2026)",
@@ -22,6 +22,8 @@ app.include_router(predict.router)
 app.include_router(optimize.router)
 app.include_router(benchmark.router)
 app.include_router(scenario.router)
+app.include_router(stream.router)
+app.include_router(report.router)
 
 @app.get("/")
 def root():

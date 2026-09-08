@@ -4,6 +4,7 @@ import ParetoChart from "../ParetoChart/ParetoChart";
 import FleetPlanView from "../FleetPlanView/FleetPlanView";
 import { getBunkering, getQuantumFuelDemo, getRetrofitRoi, getRouteOptions, getVoyageTrack, predictFuel, rerouteWeather } from "../../services/api";
 import RouteGraph from "../RouteGraph/RouteGraph";
+import { getReportUrl } from "../../services/api";
 
 const demoFront = [
   { cost_usd: 3.92e6, emissions_tco2e: 14200, delay_hours: 7 },
@@ -24,6 +25,7 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
   const [trackingProgress, setTrackingProgress] = useState(0);
   const [trackData, setTrackData] = useState(null);
   const [mlExplanation, setMlExplanation] = useState(null);
+  const [liveConvergence, setLiveConvergence] = useState([]);
   const trackingProgressRef = useRef(0);
 
   const summary = result?.result?.best_fitness ? {
@@ -55,6 +57,17 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
       sea_state: route?.route?.avg_sea_state || 4
     }).then(setRouteData).catch(() => setRouteData(null)).finally(() => setRouteLoading(false));
   }, [selectedPointIndex, result]);
+
+  useEffect(() => {
+    const stream = new EventSource("http://localhost:8000/api/convergence-stream?fleet_size=5&generations=8");
+    stream.onmessage = (event) => {
+      const payload = JSON.parse(event.data);
+      if (payload.algorithms) setLiveConvergence((current) => [...current.slice(-7), payload]);
+      if (payload.status === "complete") stream.close();
+    };
+    stream.onerror = () => stream.close();
+    return () => stream.close();
+  }, []);
 
   useEffect(() => {
     const route = trackingVessel;
@@ -229,6 +242,10 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
               <div className="chart-note"><span className="legend-dot" /> What is happening now <small>{loading ? "LIVE SEARCH" : "SYSTEM STATUS"}</small></div>
               <div className="activity-stream">{activity.map((item, index) => <div className={loading && index === 1 ? "activity-row active" : "activity-row"} key={item}><i>{index + 1}</i><span>{item}</span><b>{loading && index === 1 ? "RUNNING" : index === 2 && !loading && result ? "DONE" : "READY"}</b></div>)}</div>
             </section>
+            <section className="benchmark-live-panel">
+              <div className="chart-note"><span className="legend-dot cyan" /> LIVE CONVERGENCE STREAM <small>QIGA / QPSO / GA / PSO · Server-Sent Events</small></div>
+              <div className="convergence-strip">{liveConvergence.length ? liveConvergence.map((point) => <div className="convergence-row" key={point.generation}><strong>GEN {point.generation}</strong>{Object.entries(point.algorithms || {}).map(([name, metrics]) => <span key={name}><b>{name}</b> ${(metrics.min_cost / 1000000).toFixed(2)}M</span>)}</div>) : <p className="route-empty">Connecting to live solver convergence...</p>}</div>
+            </section>
             <RouteGraph data={routeData} loading={routeLoading} trackData={trackData} tracking={tracking} onToggleTracking={toggleTracking} />
             <section className="intelligence-panel">
               <div className="chart-note"><span className="legend-dot cyan" /> Operational intelligence <small>Re-plan with changing conditions</small></div>
@@ -237,6 +254,7 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
                 <button onClick={() => runIntelligence("bunker")} disabled={intelligenceLoading}>Find bunker arbitrage</button>
                 <button onClick={() => runIntelligence("retrofit")} disabled={intelligenceLoading}>Rank retrofit ROI</button>
                 <button onClick={() => runIntelligence("quantum")} disabled={intelligenceLoading}>Run AerSimulator circuit</button>
+                <a className="report-button" href={getReportUrl()} target="_blank" rel="noreferrer">Download case study PDF</a>
               </div>
               {intelligence?.data?.error ? <p>{intelligence.data.error}</p> : intelligence?.kind === "weather" ? <p>Weather source: <strong>{intelligence.data.live_weather?.source}</strong>; observed sea state {intelligence.data.live_weather?.sea_state}. Recommended {intelligence.data.recommended_speed_knots} kn via {intelligence.data.recommended_route?.id}; fuel delta {intelligence.data.fuel_delta_tonnes} t.</p> : intelligence?.kind === "bunker" ? <p>Best stop: <strong>{intelligence.data.recommendation?.port}</strong> at ${intelligence.data.recommendation?.price_usd_t?.[intelligence.data.fuel_type]}/t, saving ${intelligence.data.arbitrage_saving_usd_t}/t versus the highest-priced candidate.</p> : intelligence?.kind === "retrofit" ? <p>Best emission-reduction-per-dollar option: <strong>{intelligence.data.ranked_options?.[0]?.fuel_type}</strong> ({intelligence.data.ranked_options?.[0]?.reduction_per_million_usd}% reduction per $1M).</p> : intelligence?.kind === "quantum" ? <p><strong>{intelligence.data.simulator}</strong>: selected {intelligence.data.fuel_mapping?.[intelligence.data.selected_bitstring?.slice(-2)] || "fuel state"} from bitstring {intelligence.data.selected_bitstring}. {intelligence.data.executed_real_circuit ? "Real circuit executed." : "Install qiskit-aer for the real circuit."}</p> : <p>Select a Pareto point, then run a live decision aid.</p>}
             </section>
