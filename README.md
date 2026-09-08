@@ -16,6 +16,14 @@ python -m uvicorn api.app:app --reload --port 8000
 In a second terminal:
 
 ```powershell
+cd express-backend
+npm install
+npm start
+```
+
+In a third terminal:
+
+```powershell
 cd frontend
 npm install
 npm run dev
@@ -88,6 +96,9 @@ Synthetic CSV + JSON data in backend/data
 | `GET /api/bunkering-recommendations` | Port availability and fuel-price arbitrage |
 | `GET /api/retrofit-roi` | Alternative-fuel conversion ranking |
 | `GET /api/quantum-fuel-demo` | Four-qubit Qiskit AerSimulator fuel-selection demo |
+| `GET /api/prediction-metrics` | Holdout RMSE, MAE, R², and residual diagnostics |
+| `GET /api/convergence-stream` | Live SSE convergence for QIGA/QPSO/GA/PSO |
+| `GET /api/case-study-report.pdf` | Downloadable case-study PDF report |
 
 ### Five-Person Team Split
 
@@ -99,10 +110,43 @@ Synthetic CSV + JSON data in backend/data
 
 ### SIH Standout Roadmap
 
-The current MVP already demonstrates the differentiators: Open-Meteo Marine API with synthetic fallback, animated AIS-style tracking, CII/EEXI RAG status, SHAP-compatible fuel explanations, a Qiskit AerSimulator demo, route/fuel optimization, and bunkering arbitrage. The next strongest additions are persistent real AIS/weather adapters, a true multi-leg route graph, streamed solver convergence, PostgreSQL/MongoDB persistence, calibrated uncertainty, and vessel-specific CII/EEXI rules.
+The current MVP already demonstrates the differentiators: Open-Meteo Marine API with synthetic fallback, animated AIS-style tracking, CII/EEXI RAG status, SHAP-compatible fuel explanations, a Qiskit AerSimulator demo, route/fuel optimization, bunkering arbitrage, live SSE convergence, and PDF reporting. PostgreSQL and MongoDB are included in Docker Compose for the next persistence layer. The next strongest additions are persistent real AIS/weather adapters, a true multi-leg route graph, calibrated uncertainty, and vessel-specific CII/EEXI rules.
 
 See [docs/sih_implementation_map.md](docs/sih_implementation_map.md) for the exact file to edit for every feature.
 
 ### Honest Quantum-Inspired Positioning
 
 QIGA and QPSO run on classical hardware. They simulate qubit probability amplitudes and quantum-inspired update rules; they do not claim physical quantum hardware speedup. Classical GA and PSO share the same evaluator, prediction engine, and constraints for a fair comparison.
+
+### Docker Quick Start
+
+The judge setup can be started with one command:
+
+```powershell
+docker compose up --build
+```
+
+Services:
+
+- Dashboard: `http://localhost:3000`
+- FastAPI: `http://localhost:8000/docs`
+- PostgreSQL: `localhost:5432`
+- MongoDB: `localhost:27017`
+
+### Validation
+
+Run the backend smoke tests:
+
+```powershell
+cd backend
+python -m unittest discover -s tests -v
+```
+
+The frontend production build is checked with:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Optional dependencies `shap`, `qiskit`, and `qiskit-aer` enable the full explainability and simulator demos. The application keeps transparent fallbacks when these packages or live weather access are unavailable on a judging laptop.
