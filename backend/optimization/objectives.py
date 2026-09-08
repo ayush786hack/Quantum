@@ -4,7 +4,7 @@ import os
 # Add parent directory to sys.path if needed
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from prediction.predictor import predict_fuel_consumption, calculate_wtw_emissions, calculate_voyage_cost, calculate_cii_rating
+from prediction.predictor import predict_fuel_consumption, calculate_wtw_emissions, calculate_voyage_cost, calculate_cii_rating, calculate_compliance_forecast
 
 def evaluate_deployment_plan(
     fleet_plan: list,
@@ -88,18 +88,21 @@ def evaluate_deployment_plan(
         
         # CII rating
         cii_grade = calculate_cii_rating(emissions, capacity, distance)
-        cii_list.append({"vessel_id": v['vessel_id'], "grade": cii_grade})
+        compliance = calculate_compliance_forecast(emissions, capacity, distance, speed)
+        cii_list.append({"vessel_id": v['vessel_id'], "grade": cii_grade, **compliance})
         item["predicted_fuel_tonnes"] = fc
         item["wtw_emissions_tco2e"] = emissions
         item["voyage_cost_usd"] = cost
         item["cii_rating"] = cii_grade
-        item["compliance_status"] = "green" if cii_grade in ["A", "B"] else "amber" if cii_grade == "C" else "red"
+        item["compliance_status"] = compliance["status"]
+        item["compliance"] = compliance
         explainability.append({
             "vessel_id": v["vessel_id"],
             "cost_driver": f"{fuel} at {speed:.1f} kn",
             "emissions_driver": f"{fuel} WtW factor with {r.get('avg_sea_state', 3.0):.1f} sea state",
             "schedule_driver": f"{round(delay_hours, 1)} h speed trade-off",
             "shore_power_decision": "cold ironing" if sp_used else "auxiliary engine",
+            "compliance": compliance["message"],
         })
         
         # Check constraints
@@ -129,6 +132,7 @@ def evaluate_deployment_plan(
         "capacity_provided": round(total_capacity_provided, 1),
         "cargo_demand": round(total_demand_required, 1),
         "fitness_vector": [round(total_cost, 2), round(total_emissions, 2), round(total_delay, 1)]
-        ,"compliance_status": "red" if violations else "green"
+        ,"compliance_status": "red" if any(item["status"] == "red" for item in cii_list) else "amber" if any(item["status"] == "amber" for item in cii_list) else "green"
+        ,"compliance_forecast": cii_list
         ,"explainability": explainability
     }

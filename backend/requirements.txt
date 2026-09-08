@@ -6,3 +6,6 @@ fastapi
 uvicorn
 pydantic
 matplotlib
+shap
+qiskit
+qiskit-aer

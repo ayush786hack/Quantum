@@ -1,6 +1,8 @@
 import json
 import os
 import sys
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -8,10 +10,12 @@ from pydantic import BaseModel, Field
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from prediction.predictor import predict_fuel_consumption, calculate_voyage_cost, calculate_wtw_emissions
+from optimization.quantum_inspired.qaoa_demo import run_fuel_qaoa_demo
 
 router = APIRouter(prefix="/api", tags=["Scenario Intelligence"])
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RAW_DIR = os.path.join(BASE_DIR, "data", "raw")
+PORT_COORDINATES = {"R01": (31.2, 121.5), "R02": (1.3, 103.8), "R03": (53.5, 9.9), "R04": (25.2, 55.3), "R05": (35.7, 139.7), "R06": (29.9, 122.0), "R07": (-23.9, -46.3), "R08": (35.1, 129.0)}
 
 
 def _load_routes():
@@ -27,6 +31,19 @@ class WeatherUpdate(BaseModel):
     speed_knots: float = Field(default=18, gt=0)
     fuel_type: str = Field(default="LNG")
     new_sea_state: float = Field(default=5.0, ge=1, le=8)
+    use_live_weather: bool = Field(default=True)
+
+
+def _fetch_open_meteo_weather(route_id: str) -> dict:
+    latitude, longitude = PORT_COORDINATES.get(route_id, (35.0, 10.0))
+    query = urlencode({"latitude": latitude, "longitude": longitude, "current": "wave_height,wave_direction,wave_period"})
+    try:
+        with urlopen(f"https://marine-api.open-meteo.com/v1/marine?{query}", timeout=4) as response:
+            current = json.loads(response.read().decode("utf-8")).get("current", {})
+        wave_height = float(current.get("wave_height", 1.5))
+        return {"source": "Open-Meteo Marine API", "wave_height_m": wave_height, "wave_direction_deg": current.get("wave_direction"), "wave_period_s": current.get("wave_period"), "sea_state": round(max(1.0, min(8.0, 1.0 + wave_height * 1.7)), 1)}
+    except Exception as error:
+        return {"source": "synthetic live-weather fallback", "wave_height_m": None, "sea_state": 5.0, "error": str(error)}
 
 
 @router.post("/weather-reroute")
@@ -35,16 +52,23 @@ def weather_reroute(req: WeatherUpdate):
     route = next((item for item in routes if item["id"] == req.route_id), None)
     if route is None:
         raise HTTPException(status_code=404, detail="Unknown route")
+    live_weather = _fetch_open_meteo_weather(req.route_id) if req.use_live_weather else {"source": "manual scenario", "sea_state": req.new_sea_state}
+    observed_sea_state = live_weather.get("sea_state", req.new_sea_state)
     safer = dict(route)
     safer["id"] = f"{route['id']}-WEATHER"
     safer["distance_nmi"] = round(route["distance_nmi"] * 1.06, 1)
-    safer["avg_sea_state"] = max(1.0, req.new_sea_state - 1.2)
+    safer["avg_sea_state"] = max(1.0, observed_sea_state - 1.2)
     old_fc = predict_fuel_consumption(req.vessel_type, req.capacity, req.engine_power_kw, route["distance_nmi"], req.speed_knots, route["avg_sea_state"], .85, req.fuel_type)
     safer_speed = max(9.0, req.speed_knots - 1.0)
     new_fc = predict_fuel_consumption(req.vessel_type, req.capacity, req.engine_power_kw, safer["distance_nmi"], safer_speed, safer["avg_sea_state"], .85, req.fuel_type)
     old_cost = calculate_voyage_cost(old_fc, req.fuel_type, route["distance_nmi"], req.speed_knots, False)
     new_cost = calculate_voyage_cost(new_fc, req.fuel_type, safer["distance_nmi"], safer_speed, False)
-    return {"status": "success", "original_route": route, "recommended_route": safer, "recommended_speed_knots": safer_speed, "fuel_cost_delta_usd": round(new_cost - old_cost, 2), "fuel_delta_tonnes": round(new_fc - old_fc, 2), "reason": "High sea state detected; safer corridor trades distance for lower weather resistance."}
+    return {"status": "success", "live_weather": live_weather, "original_route": route, "recommended_route": safer, "recommended_speed_knots": safer_speed, "fuel_cost_delta_usd": round(new_cost - old_cost, 2), "fuel_delta_tonnes": round(new_fc - old_fc, 2), "reason": "Live weather detected; safer corridor trades distance for lower weather resistance."}
+
+
+@router.get("/quantum-fuel-demo")
+def quantum_fuel_demo():
+    return run_fuel_qaoa_demo()
 
 
 @router.get("/route-options")

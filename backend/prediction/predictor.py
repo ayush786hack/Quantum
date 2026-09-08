@@ -119,6 +119,27 @@ def predict_fuel_consumption_with_uncertainty(**kwargs) -> dict:
         "uncertainty_method": "gradient_boosting_tree_spread" if artifact is not None else "physics_fallback_margin"
     }
 
+def explain_fuel_prediction(**kwargs) -> dict:
+    """Return SHAP contributions when available, with a transparent fallback."""
+    artifact = get_model_artifact()
+    prediction = predict_fuel_consumption(**kwargs)
+    if artifact is not None:
+        try:
+            import shap
+            values = shap.TreeExplainer(artifact["model"])(_prediction_features(**kwargs)).values[0]
+            pairs = sorted(zip(artifact["feature_cols"], values), key=lambda item: abs(float(item[1])), reverse=True)[:6]
+            return {"method": "SHAP TreeExplainer", "base_value": round(float(artifact["model"].predict(_prediction_features(**kwargs))[0] - sum(values)), 2), "contributions": [{"feature": name, "impact_tonnes": round(float(value), 3)} for name, value in pairs]}
+        except Exception:
+            pass
+    contributions = [
+        {"feature": "speed_cubed", "impact_tonnes": round(prediction * 0.48, 3)},
+        {"feature": "distance_nmi", "impact_tonnes": round(prediction * 0.28, 3)},
+        {"feature": "sea_state_penalty", "impact_tonnes": round(prediction * 0.12, 3)},
+        {"feature": "fuel_energy_density", "impact_tonnes": round(prediction * 0.08, 3)},
+        {"feature": "payload_pct", "impact_tonnes": round(prediction * 0.04, 3)},
+    ]
+    return {"method": "physics-weighted contribution fallback", "base_value": 0.0, "contributions": contributions}
+
 def calculate_wtw_emissions(fuel_consumption_tonnes: float, fuel_type: str) -> float:
     """Calculates Well-to-Wake (WtW) GHG emissions in tonnes CO2e."""
     spec = FUEL_SPECS.get(fuel_type, FUEL_SPECS["HFO"])
@@ -178,6 +199,16 @@ def calculate_cii_rating(emissions_tco2e: float, capacity: float, distance_nmi: 
         return "D"
     else:
         return "E"
+
+def calculate_compliance_forecast(emissions_tco2e: float, capacity: float, distance_nmi: float, speed_knots: float = 16.0) -> dict:
+    """Compact pre-voyage CII/EEXI rule engine for the dashboard indicator."""
+    grade = calculate_cii_rating(emissions_tco2e, capacity, distance_nmi)
+    actual = (emissions_tco2e * 1e6) / max(1.0, capacity * distance_nmi)
+    reference = 12.5 * (max(1.0, capacity) ** -0.15)
+    cii_ratio = actual / max(0.1, reference)
+    eexi_ratio = cii_ratio * (1.0 + max(0.0, speed_knots - 14.0) * 0.025)
+    status = "green" if grade in ["A", "B"] and eexi_ratio <= 1.0 else "amber" if grade == "C" and eexi_ratio <= 1.25 else "red"
+    return {"status": status, "cii_grade": grade, "cii_ratio": round(cii_ratio, 2), "eexi_ratio": round(eexi_ratio, 2), "message": "Compliant before sailing" if status == "green" else "Review speed or fuel before sailing" if status == "amber" else "Plan is forecast non-compliant"}
 
 if __name__ == "__main__":
     fc = predict_fuel_consumption("Container Ship", 10000, 35000, 3600, 18.0, sea_state=3.5, fuel_type="Methanol")

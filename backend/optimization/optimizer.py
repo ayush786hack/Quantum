@@ -66,6 +66,14 @@ def run_fleet_optimization(
     for name, solver in solvers.items():
         t0 = time.time()
         res = solver.solve(scenario_evaluator)
+        for pareto_item in res.get("pareto_front", []):
+            evaluated = scenario_evaluator(pareto_item["fleet_plan"], fuel_prices, carbon_tax, demand_mult)
+            pareto_item.update({
+                "compliance_status": evaluated["compliance_status"],
+                "compliance_forecast": evaluated["compliance_forecast"],
+                "explainability": evaluated["explainability"],
+                "cii_breakdown": evaluated["cii_breakdown"],
+            })
         elapsed = round(time.time() - t0, 3)
         res["execution_time_seconds"] = elapsed
         results[name] = res

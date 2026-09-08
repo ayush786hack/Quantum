@@ -33,3 +33,4 @@ export const getVoyageTrack = (params = {}) => {
   const query = new URLSearchParams(params).toString();
   return request(`/api/voyage-track?${query}`);
 };
+export const getQuantumFuelDemo = () => request("/api/quantum-fuel-demo");

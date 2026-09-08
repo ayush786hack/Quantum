@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import ScenarioControls from "../ScenarioControls/ScenarioControls";
 import ParetoChart from "../ParetoChart/ParetoChart";
 import FleetPlanView from "../FleetPlanView/FleetPlanView";
-import { getBunkering, getRetrofitRoi, getRouteOptions, getVoyageTrack, rerouteWeather } from "../../services/api";
+import { getBunkering, getQuantumFuelDemo, getRetrofitRoi, getRouteOptions, getVoyageTrack, predictFuel, rerouteWeather } from "../../services/api";
 import RouteGraph from "../RouteGraph/RouteGraph";
 
 const demoFront = [
@@ -23,6 +23,7 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
   const [tracking, setTracking] = useState(false);
   const [trackingProgress, setTrackingProgress] = useState(0);
   const [trackData, setTrackData] = useState(null);
+  const [mlExplanation, setMlExplanation] = useState(null);
   const trackingProgressRef = useRef(0);
 
   const summary = result?.result?.best_fitness ? {
@@ -53,6 +54,20 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
       speed_knots: route?.speed_knots || 18,
       sea_state: route?.route?.avg_sea_state || 4
     }).then(setRouteData).catch(() => setRouteData(null)).finally(() => setRouteLoading(false));
+  }, [selectedPointIndex, result]);
+
+  useEffect(() => {
+    const route = trackingVessel;
+    predictFuel({
+      vessel_type: route?.vessel?.vessel_type || "Container Ship",
+      capacity: route?.vessel?.capacity || 10000,
+      engine_power_kw: route?.vessel?.engine_power_kw || 35000,
+      distance_nmi: route?.route?.distance_nmi || 3600,
+      speed_knots: route?.speed_knots || 18,
+      sea_state: route?.route?.avg_sea_state || 4,
+      payload_pct: 0.85,
+      fuel_type: route?.fuel_type || "LNG"
+    }).then((data) => setMlExplanation(data)).catch(() => setMlExplanation(null));
   }, [selectedPointIndex, result]);
 
   useEffect(() => {
@@ -101,7 +116,7 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
     try {
       const data = kind === "weather"
         ? await rerouteWeather({ route_id: selectedPlan[0]?.route?.id || "R03", vessel_type: selectedPlan[0]?.vessel?.vessel_type || "Container Ship", capacity: selectedPlan[0]?.vessel?.capacity || 10000, engine_power_kw: selectedPlan[0]?.vessel?.engine_power_kw || 35000, fuel_type: selectedPlan[0]?.fuel_type || "LNG", new_sea_state: 5 })
-        : kind === "bunker" ? await getBunkering(selectedPlan[0]?.route?.id || "R03", selectedPlan[0]?.fuel_type || "LNG") : await getRetrofitRoi();
+        : kind === "bunker" ? await getBunkering(selectedPlan[0]?.route?.id || "R03", selectedPlan[0]?.fuel_type || "LNG") : kind === "quantum" ? await getQuantumFuelDemo() : await getRetrofitRoi();
       setIntelligence({ kind, data });
     } catch (error) {
       setIntelligence({ kind, data: { error: error.message } });
@@ -114,6 +129,7 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
     { algorithm: "Classical GA (NSGA-II)", hypervolume_score: 84.5, execution_time_seconds: 2.4, convergence_generation: 16, pareto_solutions_count: 9 },
     { algorithm: "Classical PSO", hypervolume_score: 81.0, execution_time_seconds: 2.1, convergence_generation: 18, pareto_solutions_count: 8 }
   ];
+  const complianceStatus = result?.result?.compliance_status || "green";
 
   return (
     <main className="app-shell">
@@ -174,6 +190,11 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
           <strong>{front.length} <b>plans</b></strong>
           <small>Non-dominated trade-off options</small>
         </div>
+        <div className={`compliance-kpi ${complianceStatus}`}>
+          <span>PRE-SAIL COMPLIANCE</span>
+          <strong><i /> {complianceStatus.toUpperCase()}</strong>
+          <small>CII / EEXI forecast before departure</small>
+        </div>
       </section>
 
       {/* Workspace Tabs & Views */}
@@ -215,11 +236,14 @@ export default function Dashboard({ caseStudy, result, benchmark, loading, notic
                 <button onClick={() => runIntelligence("weather")} disabled={intelligenceLoading}>Weather re-suggestion</button>
                 <button onClick={() => runIntelligence("bunker")} disabled={intelligenceLoading}>Find bunker arbitrage</button>
                 <button onClick={() => runIntelligence("retrofit")} disabled={intelligenceLoading}>Rank retrofit ROI</button>
+                <button onClick={() => runIntelligence("quantum")} disabled={intelligenceLoading}>Run AerSimulator circuit</button>
               </div>
-              {intelligence?.data?.error ? <p>{intelligence.data.error}</p> : intelligence?.kind === "weather" ? <p>Recommended {intelligence.data.recommended_speed_knots} kn via {intelligence.data.recommended_route?.id}; fuel delta {intelligence.data.fuel_delta_tonnes} t and cost delta ${intelligence.data.fuel_cost_delta_usd}.</p> : intelligence?.kind === "bunker" ? <p>Best stop: <strong>{intelligence.data.recommendation?.port}</strong> at ${intelligence.data.recommendation?.price_usd_t?.[intelligence.data.fuel_type]}/t, saving ${intelligence.data.arbitrage_saving_usd_t}/t versus the highest-priced candidate.</p> : intelligence?.kind === "retrofit" ? <p>Best emission-reduction-per-dollar option: <strong>{intelligence.data.ranked_options?.[0]?.fuel_type}</strong> ({intelligence.data.ranked_options?.[0]?.reduction_per_million_usd}% reduction per $1M).</p> : <p>Select a Pareto point, then run a live decision aid.</p>}
+              {intelligence?.data?.error ? <p>{intelligence.data.error}</p> : intelligence?.kind === "weather" ? <p>Weather source: <strong>{intelligence.data.live_weather?.source}</strong>; observed sea state {intelligence.data.live_weather?.sea_state}. Recommended {intelligence.data.recommended_speed_knots} kn via {intelligence.data.recommended_route?.id}; fuel delta {intelligence.data.fuel_delta_tonnes} t.</p> : intelligence?.kind === "bunker" ? <p>Best stop: <strong>{intelligence.data.recommendation?.port}</strong> at ${intelligence.data.recommendation?.price_usd_t?.[intelligence.data.fuel_type]}/t, saving ${intelligence.data.arbitrage_saving_usd_t}/t versus the highest-priced candidate.</p> : intelligence?.kind === "retrofit" ? <p>Best emission-reduction-per-dollar option: <strong>{intelligence.data.ranked_options?.[0]?.fuel_type}</strong> ({intelligence.data.ranked_options?.[0]?.reduction_per_million_usd}% reduction per $1M).</p> : intelligence?.kind === "quantum" ? <p><strong>{intelligence.data.simulator}</strong>: selected {intelligence.data.fuel_mapping?.[intelligence.data.selected_bitstring?.slice(-2)] || "fuel state"} from bitstring {intelligence.data.selected_bitstring}. {intelligence.data.executed_real_circuit ? "Real circuit executed." : "Install qiskit-aer for the real circuit."}</p> : <p>Select a Pareto point, then run a live decision aid.</p>}
             </section>
             <section className="explainability-panel">
-              <div className="chart-note"><span className="legend-dot lime" /> Compliance & explainability <small>{selectedMetrics.compliance_status || result?.result?.compliance_status || "green"} forecast</small></div>
+              <div className="chart-note"><span className="legend-dot lime" /> Compliance & explainability <small>{complianceStatus} forecast</small></div>
+              {mlExplanation?.compliance && <div className={`compliance-banner ${mlExplanation.compliance.status}`}><strong>{mlExplanation.compliance.status.toUpperCase()}</strong><span>CII {mlExplanation.compliance.cii_grade} · EEXI ratio {mlExplanation.compliance.eexi_ratio}</span><small>{mlExplanation.compliance.message}</small></div>}
+              {mlExplanation?.explainability && <div className="ml-shap"><strong>Fuel predictor: {mlExplanation.explainability.method}</strong>{mlExplanation.explainability.contributions.slice(0, 5).map((item) => <span key={item.feature}>{item.feature} <b>{item.impact_tonnes > 0 ? "+" : ""}{item.impact_tonnes} t</b></span>)}</div>}
               {(selectedMetrics.explainability || result?.result?.explainability || []).slice(0, 4).map((item) => <div className="explain-row" key={item.vessel_id}><strong>{item.vessel_id}</strong><span>{item.cost_driver}</span><span>{item.emissions_driver}</span><span>{item.shore_power_decision}</span></div>)}
             </section>
           </>

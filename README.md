@@ -87,6 +87,7 @@ Synthetic CSV + JSON data in backend/data
 | `POST /api/weather-reroute` | Weather-adaptive route and speed recommendation |
 | `GET /api/bunkering-recommendations` | Port availability and fuel-price arbitrage |
 | `GET /api/retrofit-roi` | Alternative-fuel conversion ranking |
+| `GET /api/quantum-fuel-demo` | Four-qubit Qiskit AerSimulator fuel-selection demo |
 
 ### Five-Person Team Split
 
@@ -98,7 +99,7 @@ Synthetic CSV + JSON data in backend/data
 
 ### SIH Standout Roadmap
 
-The current MVP already demonstrates the differentiators. The next strongest additions are real AIS/weather adapters with synthetic fallback, a true multi-leg route graph, streamed solver convergence, PostgreSQL/MongoDB persistence, calibrated uncertainty, and vessel-specific CII/EEXI rules.
+The current MVP already demonstrates the differentiators: Open-Meteo Marine API with synthetic fallback, animated AIS-style tracking, CII/EEXI RAG status, SHAP-compatible fuel explanations, a Qiskit AerSimulator demo, route/fuel optimization, and bunkering arbitrage. The next strongest additions are persistent real AIS/weather adapters, a true multi-leg route graph, streamed solver convergence, PostgreSQL/MongoDB persistence, calibrated uncertainty, and vessel-specific CII/EEXI rules.
 
 See [docs/sih_implementation_map.md](docs/sih_implementation_map.md) for the exact file to edit for every feature.
 

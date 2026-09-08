@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from prediction.predictor import predict_fuel_consumption_with_uncertainty, calculate_wtw_emissions, calculate_voyage_cost, calculate_cii_rating
+from prediction.predictor import predict_fuel_consumption_with_uncertainty, explain_fuel_prediction, calculate_wtw_emissions, calculate_voyage_cost, calculate_cii_rating, calculate_compliance_forecast
 
 router = APIRouter(prefix="/api", tags=["Prediction"])
 
@@ -45,13 +45,20 @@ def predict_fuel_endpoint(req: FuelPredictionRequest):
             carbon_tax_usd_tco2e=req.carbon_tax_usd_tco2e
         )
         cii = calculate_cii_rating(emissions, req.capacity, req.distance_nmi)
+        compliance = calculate_compliance_forecast(emissions, req.capacity, req.distance_nmi, req.speed_knots)
         
         return {
             "status": "success",
             **prediction,
             "wtw_emissions_tco2e": emissions,
             "total_cost_usd": cost,
-            "cii_rating": cii
+            "cii_rating": cii,
+            "compliance": compliance,
+            "explainability": explain_fuel_prediction(
+                vessel_type=req.vessel_type, capacity=req.capacity, engine_power_kw=req.engine_power_kw,
+                distance_nmi=req.distance_nmi, speed_knots=req.speed_knots, sea_state=req.sea_state,
+                payload_pct=req.payload_pct, fuel_type=req.fuel_type
+            )
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

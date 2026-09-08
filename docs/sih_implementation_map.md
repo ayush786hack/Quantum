@@ -17,6 +17,8 @@ This is the practical map from a feature to the code a team member should open f
 | Prediction API | `backend/api/routes/predict.py` | `/api/predict-fuel` |
 | Optimization API | `backend/api/routes/optimize.py` | `/api/optimize-fleet` |
 | Scenario intelligence | `backend/api/routes/scenario.py` | Weather, route options, tracking, bunkering, retrofit |
+| Real quantum simulator | `backend/optimization/quantum_inspired/qaoa_demo.py` | Four-qubit Qiskit AerSimulator fuel-selection circuit |
+| ML explainability | `backend/prediction/predictor.py` | SHAP TreeExplainer with weighted fallback |
 | Dashboard state | `frontend/src/App.jsx` | Case study, benchmark, and optimizer state |
 | Operator controls | `frontend/src/components/ScenarioControls/ScenarioControls.jsx` | Fleet, tax, demand, fuels, shore power |
 | Pareto decisions | `frontend/src/components/ParetoChart/ParetoChart.jsx` | Cost/emissions trade-off selection |
@@ -53,6 +55,10 @@ Extend `calculate_cii_rating()` and `backend/optimization/objectives.py` with ve
 ### 7. Judge-friendly explainability
 
 Add a waterfall or contribution chart using the existing `explainability` payload. Use operational language: speed increased fuel by X, LNG reduced WtW emissions by Y, shore power avoided auxiliary fuel by Z.
+
+### 8. Real quantum simulator evidence
+
+Install `qiskit` and `qiskit-aer` from `backend/requirements.txt`, then call `/api/quantum-fuel-demo`. The UI button is in the operational intelligence panel. The fallback response is deliberate and transparent if optional quantum packages are unavailable on a demo laptop.
 
 ## Five-Minute Presentation Story
 
