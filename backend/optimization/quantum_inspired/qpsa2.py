@@ -464,6 +464,36 @@ def get_feasible_speed_range(
     )
 
 
+
+
+def is_feasible(voyage, vessel, fuel, speed):
+    """Check capacity, fuel compatibility, speed limits, and deadline."""
+    try:
+        if float(vessel["capacity_tonnes"]) < float(voyage["cargo_demand_tonnes"]):
+            return False
+
+        compatible_fuels = get_compatible_fuels(vessel)
+        if fuel not in compatible_fuels or fuel not in FUEL_ENERGY_FACTORS:
+            return False
+
+        route = get_route(voyage)
+        speed = float(speed)
+        vessel_min = float(vessel["min_speed_knots"])
+        vessel_max = float(vessel["max_speed_knots"])
+        route_max = float(route["speed_limit_knots"])
+
+        if speed < vessel_min or speed > vessel_max or speed > route_max:
+            return False
+
+        voyage_time = float(route["distance_nmi"]) / speed
+        if voyage_time > float(voyage["deadline_hours"]):
+            return False
+
+        return True
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return False
+
+
 # ============================================================
 # CREATE FEASIBLE DECISION
 # ============================================================
@@ -1514,6 +1544,14 @@ def run_qpso():
         "FINAL QPSO SOLUTION"
     )
 
+    # Final safety check: never report an overlapping vessel schedule.
+    if global_results is not None and has_vessel_conflict(global_results):
+        print("WARNING: QPSO produced an overlapping vessel schedule.")
+        print("Discarding infeasible final solution.")
+        global_results = None
+        global_cost = np.inf
+        global_ghg = np.inf
+
     print("=" * 60)
 
     print(
@@ -1555,57 +1593,58 @@ def run_qpso():
                 f"{result['wtw_ghg']:.3f}"
             )
 
-        else:
-            print(
-                "No feasible QPSO solution found."
-            )
-
-        # ========================================================
-        # SAVE QPSO RESULT
-        # ========================================================
-
-        qpso_output_file = os.path.join(
-            CURRENT_DIR,
-            "qpso_result.csv"
+    else:
+        print(
+            "No feasible QPSO solution found."
         )
 
-        if global_results is not None:
 
-            qpso_rows = []
+    # ========================================================
+    # SAVE QPSO RESULT
+    # ========================================================
 
-            for result in global_results:
+    qpso_output_file = os.path.join(
+        CURRENT_DIR,
+        "qpso_result.csv"
+    )
 
-                qpso_rows.append({
-                    "voyage_id": result["voyage_id"],
-                    "vessel_id": result["vessel_id"],
-                    "fuel_type": result["fuel_type"],
-                    "speed": result["speed"],
-                    "fuel_tonnes": result["fuel_tonnes"],
-                    "fuel_cost": result["fuel_cost"],
-                    "wtw_ghg": result["wtw_ghg"]
-                })
+    if global_results is not None:
 
-            qpso_df = pd.DataFrame(
-                qpso_rows
-            )
+        qpso_rows = []
 
-            qpso_df.to_csv(
-                qpso_output_file,
-                index=False
-            )
+        for result in global_results:
 
-            print(
-                "\nQPSO result saved to:"
-            )
+            qpso_rows.append({
+                "voyage_id": result["voyage_id"],
+                "vessel_id": result["vessel_id"],
+                "fuel_type": result["fuel_type"],
+                "speed": result["speed"],
+                "fuel_tonnes": result["fuel_tonnes"],
+                "fuel_cost": result["fuel_cost"],
+                "wtw_ghg": result["wtw_ghg"]
+            })
 
-            print(
-                qpso_output_file
-            )
-
-        return (
-            global_best,
-            global_results
+        qpso_df = pd.DataFrame(
+            qpso_rows
         )
+
+        qpso_df.to_csv(
+            qpso_output_file,
+            index=False
+        )
+
+        print(
+            "\nQPSO result saved to:"
+        )
+
+        print(
+            qpso_output_file
+        )
+
+    return (
+        global_best,
+        global_results
+    )
 
 
 # ============================================================

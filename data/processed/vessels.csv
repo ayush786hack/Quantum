@@ -1,0 +1,6 @@
+vessel_id,vessel_type,capacity_tonnes,engine_power_kw,max_speed_knots,min_speed_knots,fuel_compatible
+V001,Container,12000,22000,22,8,"HFO,LNG,Methanol"
+V002,Tanker,30000,18000,18,7,"HFO,LNG"
+V003,Bulk_Carrier,45000,25000,17,7,"HFO,Methanol,Ammonia"
+V004,RoRo,8000,15000,20,8,"LNG,Methanol"
+V005,Ferry,5000,12000,22,10,"LNG,Hydrogen"
