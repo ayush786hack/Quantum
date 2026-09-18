@@ -32,8 +32,7 @@ from prediction.predictor import (
 
 from optimization.quantum_inspired.encoding2 import (
     encode_decision,
-    decode_particle,
-    get_particle_bounds
+    decode_particle
 )
 
 
@@ -72,21 +71,10 @@ FUELS_FILE = os.path.join(
 # LOAD DATA
 # ============================================================
 
-vessels_df = pd.read_csv(
-    VESSELS_FILE
-)
-
-routes_df = pd.read_csv(
-    ROUTES_FILE
-)
-
-voyages_df = pd.read_csv(
-    VOYAGES_FILE
-)
-
-fuels_df = pd.read_csv(
-    FUELS_FILE
-)
+vessels_df = pd.read_csv(VESSELS_FILE)
+routes_df = pd.read_csv(ROUTES_FILE)
+voyages_df = pd.read_csv(VOYAGES_FILE)
+fuels_df = pd.read_csv(FUELS_FILE)
 
 
 # ============================================================
@@ -94,35 +82,25 @@ fuels_df = pd.read_csv(
 # ============================================================
 
 VESSEL_POWER_FACTORS = {
-
     "V001": 1.0,
-
     "V002": 0.8181818182,
-
     "V003": 1.1363636364,
-
     "V004": 0.6818181818,
-
     "V005": 0.5454545455
 }
 
 
 FUEL_ENERGY_FACTORS = {
-
     "HFO": 1.0,
-
     "LNG": 0.81,
-
     "Methanol": 2.0351758794,
-
     "Hydrogen": 0.3375,
-
     "Ammonia": 2.1774193548
 }
 
 
 # ============================================================
-# QPSO PARAMETERS
+# MOQPSO PARAMETERS
 # ============================================================
 
 N_PARTICLES = 20
@@ -132,6 +110,8 @@ N_ITERATIONS = 50
 BETA_START = 1.0
 
 BETA_END = 0.5
+
+ARCHIVE_SIZE = 30
 
 RANDOM_SEED = 42
 
@@ -171,8 +151,7 @@ def get_compatible_fuels(vessel):
         fuel.strip()
         for fuel in fuels
     ]
-
-
+    
 # ============================================================
 # VESSEL AVAILABILITY / SCHEDULING CONSTRAINT
 # ============================================================
@@ -194,20 +173,12 @@ def get_voyage_end_hours(voyage, speed):
     distance_nmi = float(route["distance_nmi"])
 
     start_time = get_voyage_start_hours(voyage)
-    voyage_time = calculate_voyage_time(
-        distance_nmi,
-        speed
-    )
+    voyage_time = calculate_voyage_time(distance_nmi, speed)
 
     return start_time + voyage_time
 
 
-def schedules_overlap(
-    start_a,
-    end_a,
-    start_b,
-    end_b
-):
+def schedules_overlap(start_a, end_a, start_b, end_b):
     """Return True when two time intervals overlap."""
     return (
         start_a < end_b
@@ -226,13 +197,9 @@ def decision_conflicts_with_schedules(
     already scheduled voyages using the same vessel.
     """
     start = get_voyage_start_hours(voyage)
-    end = get_voyage_end_hours(
-        voyage,
-        speed
-    )
+    end = get_voyage_end_hours(voyage, speed)
 
     for schedule in schedules:
-
         if schedule["vessel_id"] != vessel_id:
             continue
 
@@ -255,7 +222,6 @@ def has_vessel_conflict(results):
     schedules = []
 
     for result in results:
-
         voyage_id = result["voyage_id"]
         vessel_id = result["vessel_id"]
 
@@ -268,13 +234,10 @@ def has_vessel_conflict(results):
 
         voyage = voyage_matches.iloc[0]
 
-        start_time = get_voyage_start_hours(
-            voyage
-        )
+        start_time = get_voyage_start_hours(voyage)
 
-        duration = float(
-            result["voyage_time"]
-        )
+        # evaluate_decision stores this as 'voyage_time'
+        duration = float(result["voyage_time"])
 
         end_time = start_time + duration
 
@@ -286,9 +249,7 @@ def has_vessel_conflict(results):
         })
 
     for i in range(len(schedules)):
-
         for j in range(i + 1, len(schedules)):
-
             a = schedules[i]
             b = schedules[j]
 
@@ -340,18 +301,20 @@ def create_non_conflicting_decision(
             if fuel not in FUEL_ENERGY_FACTORS:
                 continue
 
+            # Try several deterministic speed points plus random
+            # sampling so the candidate has a chance to fit the
+            # vessel availability window.
             speed_candidates = [
                 min_speed,
                 max_speed,
                 (min_speed + max_speed) / 2.0
             ]
 
-            for speed_candidate in speed_candidates:
-
+            for speed in speed_candidates:
                 if not decision_conflicts_with_schedules(
                     voyage,
                     vessel["vessel_id"],
-                    speed_candidate,
+                    speed,
                     occupied_schedules
                 ):
                     candidates.append(
@@ -380,8 +343,8 @@ def create_non_conflicting_decision(
     min_speed = candidate[2]
     max_speed = candidate[3]
 
+    # Sample speed until it does not create a conflict.
     for _ in range(20):
-
         speed = rng.uniform(
             min_speed,
             max_speed
@@ -399,9 +362,8 @@ def create_non_conflicting_decision(
                 speed
             )
 
-    speed = (
-        min_speed + max_speed
-    ) / 2.0
+    # Fallback to midpoint if random samples conflict.
+    speed = (min_speed + max_speed) / 2.0
 
     return encode_decision(
         vessel_id,
@@ -413,7 +375,80 @@ def create_non_conflicting_decision(
 # FEASIBILITY CHECK
 
 # ============================================================
-# FIND FEASIBLE SPEED RANGE
+# FEASIBILITY CHECK
+# ============================================================
+
+def is_feasible(
+    voyage,
+    vessel,
+    fuel,
+    speed
+):
+
+    route = get_route(voyage)
+
+    # Capacity
+    if (
+        float(vessel["capacity_tonnes"])
+        <
+        float(voyage["cargo_demand_tonnes"])
+    ):
+
+        return False
+
+
+    # Vessel minimum speed
+    if speed < float(
+        vessel["min_speed_knots"]
+    ):
+
+        return False
+
+
+    # Vessel maximum speed
+    if speed > float(
+        vessel["max_speed_knots"]
+    ):
+
+        return False
+
+
+    # Route speed limit
+    if speed > float(
+        route["speed_limit_knots"]
+    ):
+
+        return False
+
+
+    # Fuel compatibility
+    if fuel not in get_compatible_fuels(
+        vessel
+    ):
+
+        return False
+
+
+    # Deadline
+    voyage_time = calculate_voyage_time(
+        float(route["distance_nmi"]),
+        speed
+    )
+
+    if (
+        voyage_time
+        >
+        float(voyage["deadline_hours"])
+    ):
+
+        return False
+
+
+    return True
+
+
+# ============================================================
+# FEASIBLE SPEED RANGE
 # ============================================================
 
 def get_feasible_speed_range(
@@ -421,9 +456,7 @@ def get_feasible_speed_range(
     vessel
 ):
 
-    route = get_route(
-        voyage
-    )
+    route = get_route(voyage)
 
     vessel_min = float(
         vessel["min_speed_knots"]
@@ -442,7 +475,6 @@ def get_feasible_speed_range(
         route_max
     )
 
-    # Speed required to satisfy deadline
     required_speed = (
         float(route["distance_nmi"])
         /
@@ -477,14 +509,7 @@ def create_feasible_decision(
 
     for _, vessel in vessels_df.iterrows():
 
-        vessel_id = vessel[
-            "vessel_id"
-        ]
-
-        # ----------------------------------------------------
         # Capacity
-        # ----------------------------------------------------
-
         if (
             float(vessel["capacity_tonnes"])
             <
@@ -493,10 +518,8 @@ def create_feasible_decision(
 
             continue
 
-        # ----------------------------------------------------
-        # Speed range
-        # ----------------------------------------------------
 
+        # Speed
         speed_range = (
             get_feasible_speed_range(
                 voyage,
@@ -508,14 +531,13 @@ def create_feasible_decision(
 
             continue
 
+
         min_speed, max_speed = (
             speed_range
         )
 
-        # ----------------------------------------------------
-        # Compatible fuels
-        # ----------------------------------------------------
 
+        # Compatible fuels
         compatible_fuels = (
             get_compatible_fuels(
                 vessel
@@ -524,22 +546,21 @@ def create_feasible_decision(
 
         for fuel in compatible_fuels:
 
-            if fuel not in FUEL_ENERGY_FACTORS:
+            if fuel not in (
+                FUEL_ENERGY_FACTORS
+            ):
 
                 continue
 
             candidates.append(
                 (
-                    vessel_id,
+                    vessel["vessel_id"],
                     fuel,
                     min_speed,
                     max_speed
                 )
             )
 
-    # --------------------------------------------------------
-    # No feasible solution
-    # --------------------------------------------------------
 
     if not candidates:
 
@@ -548,15 +569,13 @@ def create_feasible_decision(
             f"{voyage['voyage_id']}"
         )
 
-    # --------------------------------------------------------
-    # Random feasible candidate
-    # --------------------------------------------------------
 
     candidate = candidates[
         rng.integers(
             len(candidates)
         )
     ]
+
 
     vessel_id = candidate[0]
 
@@ -566,10 +585,12 @@ def create_feasible_decision(
 
     max_speed = candidate[3]
 
+
     speed = rng.uniform(
         min_speed,
         max_speed
     )
+
 
     return encode_decision(
         vessel_id,
@@ -597,30 +618,20 @@ def create_feasible_particle(rng):
 
         particle.append(decision)
 
-        selected_vessel_index = int(
-            round(decision[0])
-        )
+        vessel_id = int(round(decision[0]))
+        vessel = vessels_df.iloc[vessel_id]
 
-        selected_vessel = vessels_df.iloc[
-            selected_vessel_index
-        ]
+        speed = float(decision[2])
 
-        selected_speed = float(
-            decision[2]
-        )
-
-        start_time = get_voyage_start_hours(
-            voyage
-        )
-
+        start_time = get_voyage_start_hours(voyage)
         end_time = get_voyage_end_hours(
             voyage,
-            selected_speed
+            speed
         )
 
         occupied_schedules.append({
             "voyage_id": voyage["voyage_id"],
-            "vessel_id": selected_vessel["vessel_id"],
+            "vessel_id": vessel["vessel_id"],
             "start": start_time,
             "end": end_time
         })
@@ -645,10 +656,6 @@ def evaluate_decision(
     speed
 ):
 
-    # --------------------------------------------------------
-    # Feasibility
-    # --------------------------------------------------------
-
     if not is_feasible(
         voyage,
         vessel,
@@ -658,10 +665,8 @@ def evaluate_decision(
 
         return None
 
-    # --------------------------------------------------------
-    # Route
-    # --------------------------------------------------------
 
+    # Route
     route = get_route(
         voyage
     )
@@ -670,19 +675,18 @@ def evaluate_decision(
         route["distance_nmi"]
     )
 
-    # --------------------------------------------------------
-    # Draft assumption
-    # --------------------------------------------------------
 
-    # Current synthetic voyage data does not contain draft.
-    # These values are temporary demo assumptions.
+    # --------------------------------------------------------
+    # TEMPORARY DRAFT ASSUMPTION
+    # --------------------------------------------------------
 
     draft_aft = 8.0
 
     draft_fore = 8.0
 
+
     # --------------------------------------------------------
-    # Weather scenario
+    # WEATHER SCENARIO
     # --------------------------------------------------------
 
     wind_speed = 8.0
@@ -701,8 +705,9 @@ def evaluate_decision(
 
     temperature = 25.0
 
+
     # --------------------------------------------------------
-    # ML fuel prediction
+    # ML FUEL PREDICTION
     # --------------------------------------------------------
 
     fuel_rate = predict_fuel_rate(
@@ -730,8 +735,9 @@ def evaluate_decision(
         temperature=temperature
     )
 
+
     # --------------------------------------------------------
-    # Vessel calibration
+    # VESSEL CALIBRATION
     # --------------------------------------------------------
 
     vessel_id = vessel[
@@ -745,8 +751,9 @@ def evaluate_decision(
         )
     )
 
+
     # --------------------------------------------------------
-    # Fuel energy adjustment
+    # FUEL ENERGY ADJUSTMENT
     # --------------------------------------------------------
 
     fuel_factor = (
@@ -756,14 +763,16 @@ def evaluate_decision(
         )
     )
 
+
     fuel_rate *= (
         vessel_factor
         *
         fuel_factor
     )
 
+
     # --------------------------------------------------------
-    # Voyage time
+    # VOYAGE TIME
     # --------------------------------------------------------
 
     voyage_time = calculate_voyage_time(
@@ -771,8 +780,9 @@ def evaluate_decision(
         speed
     )
 
+
     # --------------------------------------------------------
-    # Fuel consumption
+    # FUEL CONSUMPTION
     # --------------------------------------------------------
 
     fuel_tonnes = calculate_voyage_fuel(
@@ -781,8 +791,9 @@ def evaluate_decision(
         speed
     )
 
+
     # --------------------------------------------------------
-    # Fuel information
+    # FUEL INFORMATION
     # --------------------------------------------------------
 
     fuel_matches = fuels_df[
@@ -796,7 +807,9 @@ def evaluate_decision(
             f"Fuel not found: {fuel}"
         )
 
+
     fuel_row = fuel_matches.iloc[0]
+
 
     fuel_price = float(
         fuel_row[
@@ -804,14 +817,16 @@ def evaluate_decision(
         ]
     )
 
+
     wtw_factor = float(
         fuel_row[
             "wtw_ghg_kg_per_kg_fuel"
         ]
     )
 
+
     # --------------------------------------------------------
-    # Cost
+    # COST
     # --------------------------------------------------------
 
     fuel_cost = (
@@ -819,6 +834,7 @@ def evaluate_decision(
         *
         fuel_price
     )
+
 
     # --------------------------------------------------------
     # WTW GHG
@@ -830,24 +846,32 @@ def evaluate_decision(
         wtw_factor
     )
 
+
     start_time = get_voyage_start_hours(voyage)
     end_time = start_time + voyage_time
 
     return {
 
-        "fuel_rate": fuel_rate,
+        "fuel_rate":
+            fuel_rate,
 
-        "voyage_time": voyage_time,
+        "voyage_time":
+            voyage_time,
 
-        "start_time_hours": start_time,
+        "start_time_hours":
+            start_time,
 
-        "end_time_hours": end_time,
+        "end_time_hours":
+            end_time,
 
-        "fuel_tonnes": fuel_tonnes,
+        "fuel_tonnes":
+            fuel_tonnes,
 
-        "fuel_cost": fuel_cost,
+        "fuel_cost":
+            fuel_cost,
 
-        "wtw_ghg": wtw_ghg
+        "wtw_ghg":
+            wtw_ghg
     }
 
 
@@ -869,15 +893,13 @@ def evaluate_particle(
 
     decoded_results = []
 
-    # --------------------------------------------------------
-    # Evaluate every voyage
-    # --------------------------------------------------------
 
     for i, decision in enumerate(
         decisions
     ):
 
         voyage = voyages_df.iloc[i]
+
 
         vessel_id = decision[
             "vessel_id"
@@ -891,10 +913,12 @@ def evaluate_particle(
             "speed_knots"
         ]
 
+
         vessel_matches = vessels_df[
             vessels_df["vessel_id"]
             == vessel_id
         ]
+
 
         if vessel_matches.empty:
 
@@ -904,9 +928,11 @@ def evaluate_particle(
                 None
             )
 
+
         vessel = (
             vessel_matches.iloc[0]
         )
+
 
         result = evaluate_decision(
             voyage,
@@ -915,9 +941,6 @@ def evaluate_particle(
             speed
         )
 
-        # ----------------------------------------------------
-        # Infeasible particle
-        # ----------------------------------------------------
 
         if result is None:
 
@@ -927,13 +950,16 @@ def evaluate_particle(
                 None
             )
 
+
         total_cost += (
             result["fuel_cost"]
         )
 
+
         total_ghg += (
             result["wtw_ghg"]
         )
+
 
         decoded_results.append({
 
@@ -952,14 +978,15 @@ def evaluate_particle(
             **result
         })
 
+
     # Final fleet-level scheduling safeguard
     if has_vessel_conflict(decoded_results):
-
         return (
             np.inf,
             np.inf,
             None
         )
+
 
     return (
         total_cost,
@@ -969,43 +996,364 @@ def evaluate_particle(
 
 
 # ============================================================
-# NORMALIZED FITNESS
+# PARETO DOMINANCE
 # ============================================================
 
-def fitness(
-    cost,
-    ghg
+def dominates(
+    objective_a,
+    objective_b
 ):
 
-    if not np.isfinite(
-        cost
-    ):
+    """
+    Both objectives are minimized.
 
-        return np.inf
-
-    if not np.isfinite(
-        ghg
-    ):
-
-        return np.inf
-
-    # --------------------------------------------------------
-    # Weighted scalar objective
-    # --------------------------------------------------------
-
-    normalized_cost = (
-        cost / 100000.0
-    )
-
-    normalized_ghg = (
-        ghg / 1000.0
-    )
+    A dominates B when:
+    - A is no worse in either objective
+    - A is strictly better in at least one
+    """
 
     return (
-        0.5 * normalized_cost
-        +
-        0.5 * normalized_ghg
+
+        objective_a[0]
+        <=
+        objective_b[0]
+
+        and
+
+        objective_a[1]
+        <=
+        objective_b[1]
+
+        and
+
+        (
+            objective_a[0]
+            <
+            objective_b[0]
+
+            or
+
+            objective_a[1]
+            <
+            objective_b[1]
+        )
     )
+
+
+# ============================================================
+# UPDATE PARETO ARCHIVE
+# ============================================================
+
+def update_archive(
+    archive,
+    particle,
+    cost,
+    ghg,
+    results
+):
+
+    if (
+        not np.isfinite(cost)
+        or
+        not np.isfinite(ghg)
+    ):
+
+        return archive
+
+
+    candidate_objective = (
+        cost,
+        ghg
+    )
+
+
+    # --------------------------------------------------------
+    # Check whether candidate is dominated
+    # --------------------------------------------------------
+
+    for entry in archive:
+
+        existing_objective = (
+            entry["cost"],
+            entry["ghg"]
+        )
+
+        if dominates(
+            existing_objective,
+            candidate_objective
+        ):
+
+            return archive
+
+
+    # --------------------------------------------------------
+    # Remove solutions dominated by candidate
+    # --------------------------------------------------------
+
+    new_archive = []
+
+    for entry in archive:
+
+        existing_objective = (
+            entry["cost"],
+            entry["ghg"]
+        )
+
+        if not dominates(
+            candidate_objective,
+            existing_objective
+        ):
+
+            new_archive.append(
+                entry
+            )
+
+
+    # --------------------------------------------------------
+    # Add candidate
+    # --------------------------------------------------------
+
+    new_archive.append({
+
+        "particle":
+            particle.copy(),
+
+        "cost":
+            cost,
+
+        "ghg":
+            ghg,
+
+        "results":
+            results
+    })
+
+
+    return new_archive
+
+
+# ============================================================
+# CROWDING DISTANCE
+# ============================================================
+
+def crowding_distance(
+    archive
+):
+
+    n = len(archive)
+
+    if n == 0:
+
+        return []
+
+
+    if n <= 2:
+
+        return [
+            np.inf
+            for _ in range(n)
+        ]
+
+
+    costs = np.array([
+        entry["cost"]
+        for entry in archive
+    ])
+
+
+    ghgs = np.array([
+        entry["ghg"]
+        for entry in archive
+    ])
+
+
+    distances = np.zeros(n)
+
+
+    for values in (
+        costs,
+        ghgs
+    ):
+
+        order = np.argsort(
+            values
+        )
+
+
+        distances[
+            order[0]
+        ] = np.inf
+
+
+        distances[
+            order[-1]
+        ] = np.inf
+
+
+        value_range = (
+            values[order[-1]]
+            -
+            values[order[0]]
+        )
+
+
+        if value_range == 0:
+
+            continue
+
+
+        for j in range(
+            1,
+            n - 1
+        ):
+
+            if np.isinf(
+                distances[order[j]]
+            ):
+
+                continue
+
+
+            distances[
+                order[j]
+            ] += (
+
+                values[
+                    order[j + 1]
+                ]
+
+                -
+
+                values[
+                    order[j - 1]
+                ]
+
+            ) / value_range
+
+
+    return distances.tolist()
+
+
+# ============================================================
+# TRUNCATE ARCHIVE
+# ============================================================
+
+def truncate_archive(
+    archive,
+    max_size
+):
+
+    if len(archive) <= max_size:
+
+        return archive
+
+
+    distances = crowding_distance(
+        archive
+    )
+
+
+    order = np.argsort(
+        np.array(
+            distances
+        )
+    )[::-1]
+
+
+    return [
+        archive[i]
+        for i in order[
+            :max_size
+        ]
+    ]
+
+
+# ============================================================
+# SELECT PARETO LEADER
+# ============================================================
+
+def select_leader(
+    archive,
+    rng
+):
+
+    if not archive:
+
+        raise ValueError(
+            "Pareto archive is empty."
+        )
+
+
+    distances = np.array(
+        crowding_distance(
+            archive
+        ),
+        dtype=float
+    )
+
+
+    # Random leader if all are boundary points
+    if np.all(
+        np.isinf(distances)
+    ):
+
+        index = rng.integers(
+            len(archive)
+        )
+
+        return archive[index]
+
+
+    finite = np.isfinite(
+        distances
+    )
+
+
+    probabilities = np.zeros(
+        len(archive)
+    )
+
+
+    if np.any(finite):
+
+        probabilities[finite] = (
+            distances[finite]
+            + 1e-12
+        )
+
+
+        max_finite = np.max(
+            probabilities[finite]
+        )
+
+
+        probabilities[
+            ~finite
+        ] = max_finite * 2.0
+
+
+        total = probabilities.sum()
+
+
+        if total > 0:
+
+            probabilities /= total
+
+
+            index = rng.choice(
+                len(archive),
+                p=probabilities
+            )
+
+
+            return archive[index]
+
+
+    index = rng.integers(
+        len(archive)
+    )
+
+    return archive[index]
 
 
 # ============================================================
@@ -1019,24 +1367,24 @@ def quantum_update(
     beta
 ):
 
-    # --------------------------------------------------------
-    # Random local attractor
-    # --------------------------------------------------------
-
     phi = np.random.rand(
         *particle.shape
     )
 
+
     local_attractor = (
-        phi * personal_best
+
+        phi
+        *
+        personal_best
+
         +
+
         (1.0 - phi)
-        * global_best
+        *
+        global_best
     )
 
-    # --------------------------------------------------------
-    # Random direction
-    # --------------------------------------------------------
 
     direction = np.where(
 
@@ -1049,9 +1397,6 @@ def quantum_update(
         1.0
     )
 
-    # --------------------------------------------------------
-    # Random quantum term
-    # --------------------------------------------------------
 
     u = np.random.uniform(
 
@@ -1062,9 +1407,6 @@ def quantum_update(
         size=particle.shape
     )
 
-    # --------------------------------------------------------
-    # Quantum-inspired position update
-    # --------------------------------------------------------
 
     new_particle = (
 
@@ -1074,18 +1416,25 @@ def quantum_update(
 
         direction
 
-        * beta
+        *
 
-        * np.abs(
+        beta
+
+        *
+
+        np.abs(
             local_attractor
             -
             particle
         )
 
-        * np.log(
+        *
+
+        np.log(
             1.0 / u
         )
     )
+
 
     return new_particle
 
@@ -1140,13 +1489,8 @@ def repair_particle(
             )
         )
 
-        vessel = vessels_df.iloc[
-            vessel_index
-        ]
-
-        fuel = fuels_df.iloc[
-            fuel_index
-        ]["fuel_type"]
+        vessel = vessels_df.iloc[vessel_index]
+        fuel = fuels_df.iloc[fuel_index]["fuel_type"]
 
         speed_range = get_feasible_speed_range(
             voyage_series,
@@ -1164,24 +1508,19 @@ def repair_particle(
         )
 
         if current_valid:
-
             min_speed, max_speed = speed_range
-
             speed = np.clip(
                 speed,
                 min_speed,
                 max_speed
             )
 
-            conflict = (
-                decision_conflicts_with_schedules(
-                    voyage_series,
-                    vessel["vessel_id"],
-                    speed,
-                    occupied_schedules
-                )
+            conflict = decision_conflicts_with_schedules(
+                voyage_series,
+                vessel["vessel_id"],
+                speed,
+                occupied_schedules
             )
-
         else:
             conflict = True
 
@@ -1194,7 +1533,6 @@ def repair_particle(
             )
 
         else:
-
             decision = [
                 float(vessel_index),
                 float(fuel_index),
@@ -1203,17 +1541,12 @@ def repair_particle(
 
         repaired.append(decision)
 
-        selected_vessel_index = int(
-            round(decision[0])
-        )
-
+        selected_vessel_index = int(round(decision[0]))
         selected_vessel = vessels_df.iloc[
             selected_vessel_index
         ]
 
-        selected_speed = float(
-            decision[2]
-        )
+        selected_speed = float(decision[2])
 
         start_time = get_voyage_start_hours(
             voyage_series
@@ -1238,115 +1571,277 @@ def repair_particle(
 
 
 # ============================================================
-# MAIN QPSO
+# PERSONAL BEST
 
 # ============================================================
-# MAIN QPSO
+# PERSONAL BEST
 # ============================================================
 
-def run_qpso():
+def choose_personal_best(
+    current_particle,
+    current_objective,
+    best_particle,
+    best_objective,
+    rng
+):
+
+    # Current dominates old best
+    if dominates(
+        current_objective,
+        best_objective
+    ):
+
+        return (
+            current_particle.copy(),
+            current_objective
+        )
+
+
+    # Old best dominates current
+    if dominates(
+        best_objective,
+        current_objective
+    ):
+
+        return (
+            best_particle.copy(),
+            best_objective
+        )
+
+
+    # Both are non-dominated
+    # Randomly keep one for diversity
+
+    if rng.random() < 0.5:
+
+        return (
+            current_particle.copy(),
+            current_objective
+        )
+
+
+    return (
+        best_particle.copy(),
+        best_objective
+    )
+
+
+# ============================================================
+# SAVE PARETO FRONT
+# ============================================================
+
+def save_pareto_front(
+    archive
+):
+
+    output_file = os.path.join(
+
+        CURRENT_DIR,
+
+        "moqpso_pareto_front.csv"
+    )
+
+
+    rows = []
+
+
+    for rank, entry in enumerate(
+        archive,
+        start=1
+    ):
+
+        row = {
+
+            "pareto_rank":
+                rank,
+
+            "total_cost":
+                entry["cost"],
+
+            "total_wtw_ghg":
+                entry["ghg"]
+        }
+
+
+        for result in (
+            entry["results"]
+        ):
+
+            voyage_id = (
+                result["voyage_id"]
+            )
+
+
+            row[
+                f"{voyage_id}_vessel"
+            ] = result[
+                "vessel_id"
+            ]
+
+
+            row[
+                f"{voyage_id}_fuel"
+            ] = result[
+                "fuel_type"
+            ]
+
+
+            row[
+                f"{voyage_id}_speed"
+            ] = result[
+                "speed"
+            ]
+
+
+            row[
+                f"{voyage_id}_fuel_tonnes"
+            ] = result[
+                "fuel_tonnes"
+            ]
+
+
+        rows.append(row)
+
+
+    pd.DataFrame(
+        rows
+    ).to_csv(
+
+        output_file,
+
+        index=False
+    )
+
+
+    return output_file
+
+
+# ============================================================
+# MAIN MOQPSO
+# ============================================================
+
+def run_moqpso():
 
     rng = np.random.default_rng(
         RANDOM_SEED
     )
 
+
     np.random.seed(
         RANDOM_SEED
     )
 
-    print("=" * 60)
+
+    print("=" * 65)
 
     print(
-        "Quantum-Inspired PSO"
+        "MULTI-OBJECTIVE "
+        "QUANTUM-INSPIRED PSO"
     )
 
-    print("=" * 60)
+    print("=" * 65)
+
 
     # --------------------------------------------------------
-    # Initialize feasible particles
+    # INITIALIZE POPULATION
     # --------------------------------------------------------
 
-    particles = []
+    particles = [
 
-    for _ in range(
-        N_PARTICLES
-    ):
-
-        particle = (
-            create_feasible_particle(
-                rng
-            )
+        create_feasible_particle(
+            rng
         )
 
-        particles.append(
-            particle
+        for _ in range(
+            N_PARTICLES
         )
-
-    # --------------------------------------------------------
-    # Personal best
-    # --------------------------------------------------------
-
-    personal_best = [
-
-        particle.copy()
-
-        for particle in particles
     ]
 
-    personal_fitness = []
 
     # --------------------------------------------------------
-    # Evaluate initial population
+    # PERSONAL BEST STORAGE
+    # --------------------------------------------------------
+
+    personal_best = []
+
+    personal_objectives = []
+
+
+    # --------------------------------------------------------
+    # PARETO ARCHIVE
+    # --------------------------------------------------------
+
+    archive = []
+
+
+    # --------------------------------------------------------
+    # INITIAL EVALUATION
     # --------------------------------------------------------
 
     for particle in particles:
 
-        cost, ghg, _ = (
+        cost, ghg, results = (
             evaluate_particle(
                 particle
             )
         )
 
-        personal_fitness.append(
-            fitness(
-                cost,
-                ghg
-            )
+
+        if results is None:
+
+            continue
+
+
+        objective = (
+            cost,
+            ghg
         )
 
-    # --------------------------------------------------------
-    # Find global best
-    # --------------------------------------------------------
 
-    best_index = int(
-        np.argmin(
-            personal_fitness
+        personal_best.append(
+            particle.copy()
         )
+
+
+        personal_objectives.append(
+            objective
+        )
+
+
+        archive = update_archive(
+
+            archive,
+
+            particle,
+
+            cost,
+
+            ghg,
+
+            results
+        )
+
+
+    archive = truncate_archive(
+
+        archive,
+
+        ARCHIVE_SIZE
     )
 
-    global_best = (
-        personal_best[
-            best_index
-        ].copy()
-    )
 
-    (
-        global_cost,
-        global_ghg,
-        global_results
-    ) = evaluate_particle(
-        global_best
-    )
+    if not archive:
 
-    global_fitness = fitness(
-        global_cost,
-        global_ghg
-    )
+        raise RuntimeError(
+            "No feasible solution found."
+        )
+
 
     print(
-        f"Initial best fitness: "
-        f"{global_fitness:.6f}"
+        f"Initial Pareto archive size: "
+        f"{len(archive)}"
     )
+
 
     # ========================================================
     # ITERATIONS
@@ -1356,9 +1851,8 @@ def run_qpso():
         N_ITERATIONS
     ):
 
-        # ----------------------------------------------------
+
         # Decreasing beta
-        # ----------------------------------------------------
 
         beta = (
 
@@ -1384,13 +1878,27 @@ def run_qpso():
             )
         )
 
+
         # ----------------------------------------------------
-        # Update particles
+        # UPDATE EACH PARTICLE
         # ----------------------------------------------------
 
         for i in range(
-            N_PARTICLES
+            len(personal_best)
         ):
+
+
+            # Select leader from Pareto archive
+
+            leader = select_leader(
+
+                archive,
+
+                rng
+            )
+
+
+            # Quantum-inspired movement
 
             particles[i] = (
                 quantum_update(
@@ -1399,15 +1907,14 @@ def run_qpso():
 
                     personal_best[i],
 
-                    global_best,
+                    leader["particle"],
 
                     beta
                 )
             )
 
-            # ------------------------------------------------
-            # Repair
-            # ------------------------------------------------
+
+            # Repair invalid values
 
             particles[i] = (
                 repair_particle(
@@ -1418,122 +1925,198 @@ def run_qpso():
                 )
             )
 
-            # ------------------------------------------------
+
             # Evaluate
-            # ------------------------------------------------
 
-            (
-                cost,
-                ghg,
-                results
-            ) = evaluate_particle(
-                particles[i]
+            cost, ghg, results = (
+                evaluate_particle(
+                    particles[i]
+                )
             )
 
-            current_fitness = fitness(
-                cost,
-                ghg
-            )
-
-            # ------------------------------------------------
-            # Ignore invalid particles
-            # ------------------------------------------------
 
             if results is None:
 
                 continue
 
-            # ------------------------------------------------
-            # Personal best
-            # ------------------------------------------------
 
-            if (
-                current_fitness
-                <
-                personal_fitness[i]
-            ):
+            current_objective = (
+                cost,
+                ghg
+            )
 
-                personal_best[i] = (
-                    particles[i].copy()
-                )
-
-                personal_fitness[i] = (
-                    current_fitness
-                )
 
             # ------------------------------------------------
-            # Global best
+            # PERSONAL BEST
             # ------------------------------------------------
 
-            if (
-                current_fitness
-                <
-                global_fitness
-            ):
+            (
+                personal_best[i],
 
-                global_best = (
-                    particles[i].copy()
-                )
+                personal_objectives[i]
 
-                global_fitness = (
-                    current_fitness
-                )
+            ) = choose_personal_best(
 
-                global_cost = (
-                    cost
-                )
+                particles[i],
 
-                global_ghg = (
-                    ghg
-                )
+                current_objective,
 
-                global_results = (
-                    results
-                )
+                personal_best[i],
 
-        # ----------------------------------------------------
-        # Progress
-        # ----------------------------------------------------
+                personal_objectives[i],
+
+                rng
+            )
+
+
+            # ------------------------------------------------
+            # PARETO ARCHIVE
+            # ------------------------------------------------
+
+            archive = update_archive(
+
+                archive,
+
+                particles[i],
+
+                cost,
+
+                ghg,
+
+                results
+            )
+
+
+            archive = truncate_archive(
+
+                archive,
+
+                ARCHIVE_SIZE
+            )
+
 
         print(
 
             f"Iteration "
             f"{iteration + 1:02d}/"
-            f"{N_ITERATIONS} "
-            f"| Best fitness: "
-            f"{global_fitness:.6f}"
+            f"{N_ITERATIONS}"
+
+            f" | Pareto solutions: "
+            f"{len(archive):02d}"
         )
 
+
     # ========================================================
-    # FINAL RESULT
+    # FINAL PARETO FRONT
     # ========================================================
 
-    print("\n" + "=" * 60)
+    archive = truncate_archive(
 
-    print(
-        "FINAL QPSO SOLUTION"
+        archive,
+
+        ARCHIVE_SIZE
     )
 
-    print("=" * 60)
+
+    archive = sorted(
+
+        archive,
+
+        key=lambda x: x["cost"]
+    )
+
+
+    print("\n" + "=" * 65)
 
     print(
-        f"Total Cost : "
-        f"${global_cost:.2f}"
+        "FINAL MOQPSO PARETO FRONT"
+    )
+
+    print("=" * 65)
+
+
+    for i, entry in enumerate(
+
+        archive,
+
+        start=1
+    ):
+
+        print(
+
+            f"Plan {i:02d} | "
+
+            f"Cost: "
+            f"${entry['cost']:.2f} | "
+
+            f"WTW GHG: "
+            f"{entry['ghg']:.3f} "
+            f"tCO2e"
+        )
+
+
+    # ========================================================
+    # SAVE
+    # ========================================================
+
+    output_file = (
+        save_pareto_front(
+            archive
+        )
+    )
+
+
+    print(
+        "\nSaved Pareto front:"
     )
 
     print(
-        f"Total WTW GHG : "
-        f"{global_ghg:.3f} "
-        f"tonnes CO2e"
+        output_file
     )
 
-    print(
-        "\nVoyage-wise plan:"
-    )
 
-    if global_results is not None:
+    # ========================================================
+    # REPRESENTATIVE PLAN
+    # ========================================================
 
-        for result in global_results:
+    if archive:
+
+        representative = archive[
+            len(archive) // 2
+        ]
+
+
+        print(
+            "\nRepresentative "
+            "Pareto Plan"
+        )
+
+        print("-" * 65)
+
+
+        print(
+
+            f"Total Cost : "
+            f"${representative['cost']:.2f}"
+        )
+
+
+        print(
+
+            f"Total WTW GHG : "
+            f"{representative['ghg']:.3f} "
+            f"tonnes CO2e"
+        )
+
+
+        print(
+            "\nVoyage-wise plan:"
+        )
+
+
+        for result in (
+            representative["results"]
+        ):
 
             print(
 
@@ -1555,57 +2138,8 @@ def run_qpso():
                 f"{result['wtw_ghg']:.3f}"
             )
 
-        else:
-            print(
-                "No feasible QPSO solution found."
-            )
 
-        # ========================================================
-        # SAVE QPSO RESULT
-        # ========================================================
-
-        qpso_output_file = os.path.join(
-            CURRENT_DIR,
-            "qpso_result.csv"
-        )
-
-        if global_results is not None:
-
-            qpso_rows = []
-
-            for result in global_results:
-
-                qpso_rows.append({
-                    "voyage_id": result["voyage_id"],
-                    "vessel_id": result["vessel_id"],
-                    "fuel_type": result["fuel_type"],
-                    "speed": result["speed"],
-                    "fuel_tonnes": result["fuel_tonnes"],
-                    "fuel_cost": result["fuel_cost"],
-                    "wtw_ghg": result["wtw_ghg"]
-                })
-
-            qpso_df = pd.DataFrame(
-                qpso_rows
-            )
-
-            qpso_df.to_csv(
-                qpso_output_file,
-                index=False
-            )
-
-            print(
-                "\nQPSO result saved to:"
-            )
-
-            print(
-                qpso_output_file
-            )
-
-        return (
-            global_best,
-            global_results
-        )
+    return archive
 
 
 # ============================================================
@@ -1614,4 +2148,4 @@ def run_qpso():
 
 if __name__ == "__main__":
 
-    run_qpso()
+    run_moqpso()

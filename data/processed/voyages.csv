@@ -1,0 +1,5 @@
+voyage_id,route_id,cargo_demand_tonnes,deadline_hours,start_time_hours
+VOY001,R001,8000,60,0
+VOY002,R002,15000,100,24
+VOY003,R003,3000,24,48
+VOY004,R004,20000,110,72

@@ -1,0 +1,5 @@
+route_id,origin,destination,distance_nmi,speed_limit_knots
+R001,Mumbai,Dubai,1050,20
+R002,Chennai,Singapore,1580,18
+R003,Kochi,Colombo,325,18
+R004,Kolkata,Port Klang,1700,18

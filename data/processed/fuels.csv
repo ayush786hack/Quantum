@@ -1,0 +1,6 @@
+fuel_type,energy_density_mj_kg,price_per_tonne,ttw_co2_kg_per_kg_fuel,wtw_ghg_kg_per_kg_fuel
+HFO,40.5,550,3.114,3.5
+LNG,50.0,700,2.75,3.2
+Methanol,19.9,900,1.375,1.8
+Hydrogen,120.0,2500,0.0,1.0
+Ammonia,18.6,1400,0.0,0.5
